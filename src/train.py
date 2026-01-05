@@ -24,7 +24,7 @@ import json
 import jax
 import jax.numpy as jn
 import numpy as np
-import tensorflow as tf  # For data augmentation.
+import tensorflow as tf  
 import tensorflow_datasets as tfds
 from absl import app, flags
 
@@ -174,7 +174,7 @@ def network(arch: str):
         return functools.partial(wide_resnet.WideResNet, depth=28, width=10)
     raise ValueError('Architecture not recognized', arch)
 
-def get_data(seed, flags_obj=None):
+def get_data(seed, config_dict):
     """
     This is the function to generate subsets of the data for training models.
 
@@ -184,156 +184,75 @@ def get_data(seed, flags_obj=None):
     Then, we compute the subset. This works in one of two ways.
 
     1. If we have a seed, then we just randomly choose examples based on
-       a prng with that seed, keeping flags_obj.pkeep fraction of the data.
+       a prng with that seed, keeping config_dict['pkeep'] fraction of the data.
 
     2. Otherwise, if we have an experiment ID, then we do something fancier.
        If we run each experiment independently then even after a lot of trials
        there will still probably be some examples that were always included
        or always excluded. So instead, with experiment IDs, we guarantee that
-       after flags_obj.num_experiments are done, each example is seen exactly half
+       after config_dict['num_experiments'] are done, each example is seen exactly half
        of the time in train, and half of the time not in train.
 
     Args:
         seed: Random seed for data subset selection
-        flags_obj: Optional FLAGS object. If None, uses the module-level FLAGS.
     """
-    # Use provided flags_obj or fall back to module-level FLAGS
-    flags_to_use = flags_obj if flags_obj is not None else FLAGS
-    
-    DATA_DIR = os.path.join(os.environ['HOME'], 'TFDS')
+    logdir = config_dict['logdir']
+    dataset_name = config_dict['dataset']
+    dataset_size = config_dict['dataset_size']
+    num_experiments = config_dict['num_experiments']
+    expid = config_dict['expid']
+    pkeep = config_dict['pkeep']
+    only_subset = config_dict['only_subset']
+    augment_type = config_dict['augment']
+    batch_size = config_dict['batch']
+    data_dir = config_dict['data_dir']
 
-    if os.path.exists(os.path.join(flags_to_use.logdir, "x_train.npy")):
-        inputs = np.load(os.path.join(flags_to_use.logdir, "x_train.npy"))
-        labels = np.load(os.path.join(flags_to_use.logdir, "y_train.npy"))
+    if os.path.exists(os.path.join(logdir, "x_train.npy")):
+        inputs = np.load(os.path.join(logdir, "x_train.npy"))
+        labels = np.load(os.path.join(logdir, "y_train.npy"))
     else:
         print("First time, creating dataset")
-        data = tfds.as_numpy(tfds.load(name=flags_to_use.dataset, batch_size=-1, data_dir=DATA_DIR))
+        data = tfds.as_numpy(tfds.load(name=dataset_name, batch_size=-1, data_dir=data_dir))
         inputs = data['train']['image']
         labels = data['train']['label']
 
         inputs = (inputs/127.5)-1
-        np.save(os.path.join(flags_to_use.logdir, "x_train.npy"),inputs)
-        np.save(os.path.join(flags_to_use.logdir, "y_train.npy"),labels)
+        np.save(os.path.join(logdir, "x_train.npy"), inputs)
+        np.save(os.path.join(logdir, "y_train.npy"), labels)
     
-    inputs = inputs[:flags_to_use.dataset_size]
-    labels = labels[:flags_to_use.dataset_size]
+    inputs = inputs[:dataset_size]
+    labels = labels[:dataset_size]
     nclass = np.max(labels)+1
 
     np.random.seed(seed)
-    if flags_to_use.num_experiments is not None:
+    if num_experiments is not None:
         np.random.seed(0)
-        keep = np.random.uniform(0,1,size=(flags_to_use.num_experiments, flags_to_use.dataset_size))
+        keep = np.random.uniform(0, 1, size=(num_experiments, dataset_size))
         order = keep.argsort(0)
-        keep = order < int(flags_to_use.pkeep * flags_to_use.num_experiments)
-        keep = np.array(keep[flags_to_use.expid], dtype=bool)
+        keep = order < int(pkeep * num_experiments)
+        keep = np.array(keep[expid], dtype=bool)
     else:
-        keep = np.random.uniform(0, 1, size=flags_to_use.dataset_size) <= flags_to_use.pkeep
+        keep = np.random.uniform(0, 1, size=dataset_size) <= pkeep
 
-    if flags_to_use.only_subset is not None:
-        keep[flags_to_use.only_subset:] = 0
+    if only_subset is not None:
+        keep[only_subset:] = 0
 
     xs = inputs[keep]
     ys = labels[keep]
 
-    if flags_to_use.augment == 'weak':
+    if augment_type == 'weak':
         aug = lambda x: augment(x, 4)
-    elif flags_to_use.augment == 'mirror':
+    elif augment_type == 'mirror':
         aug = lambda x: augment(x, 0)
-    elif flags_to_use.augment == 'none':
+    elif augment_type == 'none':
         aug = lambda x: augment(x, 0, mirror=False)
     else:
-        raise
+        raise ValueError(f"Unknown augmentation type: {augment_type}")
 
     train = DataSet.from_arrays(xs, ys, augment_fn=aug)
-    test = DataSet.from_tfds(tfds.load(name=flags_to_use.dataset, split='test', data_dir=DATA_DIR), xs.shape[1:])
-    train = train.cache().shuffle(8192).repeat().parse().augment().batch(flags_to_use.batch)
+    test = DataSet.from_tfds(tfds.load(name=dataset_name, split='test', data_dir=DATA_DIR), xs.shape[1:])
+    train = train.cache().shuffle(8192).repeat().parse().augment().batch(batch_size)
     train = train.nchw().one_hot(nclass).prefetch(16)
-    test = test.cache().parse().batch(flags_to_use.batch).nchw().prefetch(16)
+    test = test.cache().parse().batch(batch_size).nchw().prefetch(16)
 
     return train, test, xs, ys, keep, nclass
-
-def main(argv):
-    del argv
-    tf.config.experimental.set_visible_devices([], "GPU")
-
-    seed = FLAGS.seed
-    if seed is None:
-        import time
-        seed = np.random.randint(0, 1000000000)
-        seed ^= int(time.time())
-
-    args = EasyDict(arch=FLAGS.arch,
-                    lr=FLAGS.lr,
-                    batch=FLAGS.batch,
-                    weight_decay=FLAGS.weight_decay,
-                    augment=FLAGS.augment,
-                    seed=seed)
-
-
-    if FLAGS.tunename:
-        logdir = '_'.join(sorted('%s=%s' % k for k in args.items()))
-    elif FLAGS.expid is not None:
-        logdir = "experiment-%d_%d"%(FLAGS.expid,FLAGS.num_experiments)
-    else:
-        logdir = "experiment-"+str(seed)
-    logdir = os.path.join(FLAGS.logdir, logdir)
-
-    if os.path.exists(os.path.join(logdir, "ckpt", "%010d.npz"%FLAGS.epochs)):
-        print(f"run {FLAGS.expid} already completed.")
-        return
-    else:
-        if os.path.exists(logdir):
-            print(f"deleting run {FLAGS.expid} that did not complete.")
-            shutil.rmtree(logdir)
-
-    print(f"starting run {FLAGS.expid}.")
-    if not os.path.exists(logdir):
-        os.makedirs(logdir)
-
-    train, test, xs, ys, keep, nclass = get_data(seed, FLAGS)
-
-    # Define the network and train_it
-    tm = MemModule(network(FLAGS.arch), nclass=nclass,
-                   mnist=FLAGS.dataset == 'mnist',
-                   epochs=FLAGS.epochs,
-                   expid=FLAGS.expid,
-                   num_experiments=FLAGS.num_experiments,
-                   pkeep=FLAGS.pkeep,
-                   save_steps=FLAGS.save_steps,
-                   only_subset=FLAGS.only_subset,
-                   **args
-    )
-
-    r = {}
-    r.update(tm.params)
-
-    open(os.path.join(logdir,'hparams.json'),"w").write(json.dumps(tm.params))
-    np.save(os.path.join(logdir,'keep.npy'), keep)
-
-    tm.train(FLAGS.epochs, len(xs), train, test, logdir,
-             save_steps=FLAGS.save_steps, patience=FLAGS.patience, eval_steps=FLAGS.eval_steps)
-
-
-
-if __name__ == '__main__':
-    flags.DEFINE_string('arch', 'cnn32-3-mean', 'Model architecture.')
-    flags.DEFINE_float('lr', 0.1, 'Learning rate.')
-    flags.DEFINE_string('dataset', 'cifar10', 'Dataset.')
-    flags.DEFINE_float('weight_decay', 0.0005, 'Weight decay ratio.')
-    flags.DEFINE_integer('batch', 256, 'Batch size')
-    flags.DEFINE_integer('epochs', 501, 'Training duration in number of epochs.')
-    flags.DEFINE_string('logdir', 'experiments', 'Directory where to save checkpoints and tensorboard data.')
-    flags.DEFINE_integer('seed', None, 'Training seed.')
-    flags.DEFINE_float('pkeep', .5, 'Probability to keep examples.')
-    flags.DEFINE_integer('expid', None, 'Experiment ID')
-    flags.DEFINE_integer('num_experiments', None, 'Number of experiments')
-    flags.DEFINE_string('augment', 'weak', 'Strong or weak augmentation')
-    flags.DEFINE_integer('only_subset', None, 'Only train on a subset of images.')
-    flags.DEFINE_integer('dataset_size', 50000, 'number of examples to keep.')
-    flags.DEFINE_integer('eval_steps', 1, 'how often to get eval accuracy.')
-    flags.DEFINE_integer('abort_after_epoch', None, 'stop trainin early at an epoch')
-    flags.DEFINE_integer('save_steps', 10, 'how often to get save model.')
-    flags.DEFINE_integer('patience', None, 'Early stopping after this many epochs without progress')
-    flags.DEFINE_bool('tunename', False, 'Use tune name?')
-    app.run(main)
-
