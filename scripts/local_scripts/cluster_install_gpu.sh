@@ -1,70 +1,78 @@
-echo "Installing Environment for Likelihood Ratio Attack [LiRA Environment]"
+#!/bin/bash
+module purge
+# Load CUDA 11.8.0 (TensorFlow 2.13.0 was built with CUDA 11.8)
+module load cuda/11.8.0
+module load cudnn/8.5.0.96-11.7-cuda
+module load anaconda3
 
-# Load TensorFlow module for CUDA environment (but we'll use system Python for venv)
-if command -v module >/dev/null 2>&1; then
-    echo "Loading TensorFlow module for CUDA environment..."
-    module load tensorflow/2.13 2>/dev/null || echo "WARNING: Could not load tensorflow module"
-fi
-
-# Set the virtual environment path
-mkdir -p /tmp/python-venv
-MAIN_VENV_PATH="/tmp/python-venv/lra_venv"
-
-if [ -d "$MAIN_VENV_PATH" ]; then
-    echo "Virtual environment 'lra_venv' already exists in $MAIN_VENV_PATH."
+# Initialize conda in this non-interactive shell
+if command -v conda >/dev/null 2>&1; then
+    eval "$(conda shell.bash hook)"
 else
-    echo "Creating virtual environment 'lra_venv' using system Python..."
-    python3.9 -m venv "$MAIN_VENV_PATH"
+    echo "conda not found after loading anaconda3 module" >&2
+    exit 1
 fi
 
-source "$MAIN_VENV_PATH/bin/activate"
+mkdir -p /tmp/python-venv
 
-pip install --upgrade pip
+if [ -d "/tmp/python-venv/lra_venv" ]; then
+    echo "Conda env 'lra_venv' already exists in /tmp/python-venv."
+else
+    echo "Creating conda env 'lra_venv' in /tmp/python-venv..."
+    conda create --prefix /tmp/python-venv/lra_venv python=3.9 -y || { echo "conda create failed" >&2; exit 1; }
+fi
 
-# Install packages from requirements.txt
-# Note: TensorFlow from module will be available when module is loaded
-# But we can also install it via pip if needed for venv isolation
-pip install -r requirements.txt
+conda activate /tmp/python-venv/lra_venv || { echo "conda activate failed" >&2; exit 1; }
 
-# Verify TensorFlow can see GPU
-echo "Verifying TensorFlow GPU support..."
-python -c "import tensorflow as tf; print('TensorFlow version:', tf.__version__); gpus = tf.config.list_physical_devices('GPU'); print('GPU devices:', gpus); print('GPU available:', len(gpus) > 0)" 2>&1 | grep -v "Unable to register" || {
-    echo "WARNING: TensorFlow GPU not detected. Make sure TensorFlow module is loaded."
-}
+# Install requirements
+PYTHONNOUSERSITE=1 pip install -r requirements.txt || { echo "pip install requirements failed" >&2; exit 1; }
 
-# Register the kernel with current environment variables
-python -m ipykernel install --user --name=lra-env --display-name "lra-env"
+# Avoid user-site interference
+PYTHONNOUSERSITE=1 pip install ipykernel || { echo "pip install ipykernel failed" >&2; exit 1; }
 
+# Register kernel first (this creates the directory and basic kernel.json)
+python -m ipykernel install --user --name=lra-env --display-name "Python (lra-env)" || { echo "ipykernel install failed" >&2; exit 1; }
+
+# Create the custom kernel spec directory (in case ipykernel didn't create it)
 KERNEL_DIR=~/.local/share/jupyter/kernels/lra-env
 mkdir -p "$KERNEL_DIR"
-ABSOLUTE_VENV_PATH=$(realpath "$MAIN_VENV_PATH")
 
-# Save current environment to kernel.json so it's available in Jupyter
+# Create a simple wrapper that loads modules before starting kernel
+KERNEL_WRAPPER="$KERNEL_DIR/kernel_wrapper.sh"
+cat > "$KERNEL_WRAPPER" <<'WRAPPER_EOF'
+#!/bin/bash
+# Simple wrapper to load modules before starting kernel
+if [ -f /usr/local/pace-apps/lmod/lmod/init/bash ]; then
+    source /usr/local/pace-apps/lmod/lmod/init/bash
+fi
+# Load CUDA 11.8 (TensorFlow 2.13.0 was built with CUDA 11.8)
+module load cuda/11.8.0
+module load cudnn/8.5.0.96-11.7-cuda
+# TensorFlow module loads CUDA 12.1.1, but we need CUDA 11.8 for pip-installed TF
+# So we don't load tensorflow module, just CUDA/cuDNN
+exec "$@"
+WRAPPER_EOF
+chmod +x "$KERNEL_WRAPPER"
+
+# Write the kernel.json with wrapper (use absolute path for wrapper)
+KERNEL_WRAPPER_ABS=$(readlink -f "$KERNEL_WRAPPER" 2>/dev/null || echo "$KERNEL_WRAPPER")
 cat > "$KERNEL_DIR/kernel.json" <<EOL
 {
   "argv": [
-    "$ABSOLUTE_VENV_PATH/bin/python",
+    "$KERNEL_WRAPPER_ABS",
+    "/tmp/python-venv/lra_venv/bin/python",
     "-m",
     "ipykernel_launcher",
     "-f",
     "{connection_file}"
   ],
   "display_name": "Python (lra-env)",
-  "language": "python",
-  "env": {
-    "CUDA_HOME": "${CUDA_HOME:-}",
-    "LD_LIBRARY_PATH": "${LD_LIBRARY_PATH:-}",
-    "PATH": "${PATH:-}"
-  }
+  "language": "python"
 }
 EOL
 
+conda deactivate
+
 echo ""
 echo "✅ Installation complete!"
-echo ""
-echo "⚠️  IMPORTANT:"
-echo "   - TensorFlow module should be loaded when using TensorFlow (it provides GPU support)"
-echo "   - Restart your Jupyter kernel to use GPU in notebooks"
-    echo "   - To use TensorFlow: 'module load tensorflow/2.13' before running Python"
-
-deactivate
+echo "⚠️  Restart your Jupyter kernel to use GPU in notebooks."
