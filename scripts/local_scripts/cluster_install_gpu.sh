@@ -21,7 +21,7 @@ pip install --upgrade pip
 pip install -r requirements.txt
 
 # Register the kernel
-python -m ipykernel install --user --name=lra-env --display-name "lra-env (bell)"
+python -m ipykernel install --user --name=lra-env --display-name "lra-env"
 
 # Create the custom kernel spec directory
 KERNEL_DIR=~/.local/share/jupyter/kernels/lra-env
