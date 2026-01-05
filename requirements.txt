@@ -1,7 +1,7 @@
 absl-py==1.4.0
 ipykernel==6.26.0
-jax==0.4.13
-jaxlib==0.4.13
+jax==0.4.7
+jaxlib==0.4.7
 matplotlib==3.7.3
 numpy==1.23.5
 objax==1.6.0
