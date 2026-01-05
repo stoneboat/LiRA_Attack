@@ -250,7 +250,7 @@ def get_data(seed, config_dict):
         raise ValueError(f"Unknown augmentation type: {augment_type}")
 
     train = DataSet.from_arrays(xs, ys, augment_fn=aug)
-    test = DataSet.from_tfds(tfds.load(name=dataset_name, split='test', data_dir=DATA_DIR), xs.shape[1:])
+    test = DataSet.from_tfds(tfds.load(name=dataset_name, split='test', data_dir=data_dir), xs.shape[1:])
     train = train.cache().shuffle(8192).repeat().parse().augment().batch(batch_size)
     train = train.nchw().one_hot(nclass).prefetch(16)
     test = test.cache().parse().batch(batch_size).nchw().prefetch(16)
