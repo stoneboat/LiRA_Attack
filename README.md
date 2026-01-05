@@ -8,35 +8,48 @@ by Nicholas Carlini, Steve Chien, Milad Nasr, Shuang Song, Andreas Terzis, and F
 
 ### INSTALLING
 
-You will need to install fairly standard dependencies
+You can create a Python virtual environment and install all dependencies from `requirements.txt`:
 
-`pip install scipy, sklearn, numpy, matplotlib`
+```bash
+# Create virtual environment (using conda or venv)
+conda create --prefix /path/to/venv python=3.9 -y
+conda activate /path/to/venv
 
-and also some machine learning framework to train models. We train our models
-with JAX + ObJAX so you will need to follow build instructions for that
-https://github.com/google/objax
-https://objax.readthedocs.io/en/latest/installation_setup.html
+# Install dependencies
+pip install -r requirements.txt
+```
+
+**For PACE cluster users (Georgia Tech):**
+We provide a tested installation script that sets up the environment with GPU support for both TensorFlow and JAX:
+
+```bash
+bash scripts/local_scripts/cluster_install_gpu.sh
+```
 
 ### RUNNING THE CODE
 
 #### 1. Train the models
 
-The first step in our attack is to train shadow models. As a baseline that
-should give most of the gains in our attack, you should start by training 16
-shadow models with the command
+The first step in our attack is to train shadow models. As a baseline that should give most of the gains in our attack, you should start by training 16 shadow models using the Jupyter notebook:
 
-> bash scripts/train_demo.sh
+> Notebooks/lira_attack/train_model.ipynb
 
-or if you have multiple GPUs on your machine and want to train these models in
-parallel, then modify and run
+**Understanding the parameters:**
+- `expid` chooses which subset of the 50,000 training points to train on. Each `expid` value (0-15) corresponds to a different subset selection.
+- `num_experiments=16` means you intend to train a family of 16 shadow models (expid 0–15) with a balanced inclusion pattern so every example is "in" about half the time (if you set `pkeep=0.5`).
+- `pkeep` is the probability that each sample will be included in the training set.
 
-> bash scripts/train_demo_multigpu.sh
+**To train 16 shadow models:**
+Run the notebook 16 times, each time setting `expid` to a different value from 0 to 15. For example:
+- First run: set `expid = 0` and `num_experiments = 16`
+- Second run: set `expid = 1` and `num_experiments = 16`
+- Continue until `expid = 15`
 
 This will train several CIFAR-10 wide ResNet models to ~91% accuracy each, and
-will output a bunch of files under the directory exp/cifar10 with structure:
+will output a bunch of files under the directory `logs/exp/cifar10/` with structure:
 
 ```
-exp/cifar10/
+logs/exp/cifar10/
 - experiment_N_of_16
 -- hparams.json
 -- keep.npy

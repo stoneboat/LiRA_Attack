@@ -87,6 +87,18 @@ if [ -n "$CUDNNROOT" ]; then
     export CUDNNROOT
 fi
 
+# JAX memory management: Prevent pre-allocation of GPU memory
+# This allows JAX to allocate memory on-demand instead of grabbing all GPU memory at startup
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+# Limit JAX to use at most 80% of GPU memory (leaves room for TensorFlow or other processes)
+export XLA_PYTHON_CLIENT_MEM_FRACTION=0.8
+# Use platform allocator for better memory management
+export XLA_PYTHON_CLIENT_ALLOCATOR=platform
+
+# TensorFlow memory management: Prevent pre-allocation
+# Allow TensorFlow to grow memory usage as needed instead of allocating all at once
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+
 # TensorFlow module loads CUDA 12.1.1, but we need CUDA 11.7 for pip-installed TF 2.13.0
 # So we don't load tensorflow module, just CUDA/cuDNN
 exec "$@"
