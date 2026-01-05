@@ -69,7 +69,7 @@ class TrainLoop(objax.Module):
             if summary is not None:
                 summary.scalar(k, float(v))
 
-    def train(self, num_train_epochs: int, train_size: int, train: DataSet, test: DataSet, logdir: str, save_steps=100, patience=None):
+    def train(self, num_train_epochs: int, train_size: int, train: DataSet, test: DataSet, logdir: str, save_steps=100, patience=None, eval_steps=100):
         """
         Completely standard training. Nothing interesting to see here.
         """
@@ -92,7 +92,7 @@ class TrainLoop(objax.Module):
 
                 # Eval
                 accuracy, total = 0, 0
-                if epoch%FLAGS.eval_steps == 0 and test is not None:
+                if epoch%eval_steps == 0 and test is not None:
                     for data in test:
                         total += data['image'].shape[0]
                         preds = np.argmax(self.predict(data['image'].numpy()), axis=1)
@@ -174,7 +174,7 @@ def network(arch: str):
         return functools.partial(wide_resnet.WideResNet, depth=28, width=10)
     raise ValueError('Architecture not recognized', arch)
 
-def get_data(seed):
+def get_data(seed, flags_obj=None):
     """
     This is the function to generate subsets of the data for training models.
 
@@ -184,64 +184,71 @@ def get_data(seed):
     Then, we compute the subset. This works in one of two ways.
 
     1. If we have a seed, then we just randomly choose examples based on
-       a prng with that seed, keeping FLAGS.pkeep fraction of the data.
+       a prng with that seed, keeping flags_obj.pkeep fraction of the data.
 
     2. Otherwise, if we have an experiment ID, then we do something fancier.
        If we run each experiment independently then even after a lot of trials
        there will still probably be some examples that were always included
        or always excluded. So instead, with experiment IDs, we guarantee that
-       after FLAGS.num_experiments are done, each example is seen exactly half
+       after flags_obj.num_experiments are done, each example is seen exactly half
        of the time in train, and half of the time not in train.
 
+    Args:
+        seed: Random seed for data subset selection
+        flags_obj: Optional FLAGS object. If None, uses the module-level FLAGS.
     """
+    # Use provided flags_obj or fall back to module-level FLAGS
+    flags_to_use = flags_obj if flags_obj is not None else FLAGS
+    
     DATA_DIR = os.path.join(os.environ['HOME'], 'TFDS')
 
-    if os.path.exists(os.path.join(FLAGS.logdir, "x_train.npy")):
-        inputs = np.load(os.path.join(FLAGS.logdir, "x_train.npy"))
-        labels = np.load(os.path.join(FLAGS.logdir, "y_train.npy"))
+    if os.path.exists(os.path.join(flags_to_use.logdir, "x_train.npy")):
+        inputs = np.load(os.path.join(flags_to_use.logdir, "x_train.npy"))
+        labels = np.load(os.path.join(flags_to_use.logdir, "y_train.npy"))
     else:
         print("First time, creating dataset")
-        data = tfds.as_numpy(tfds.load(name=FLAGS.dataset, batch_size=-1, data_dir=DATA_DIR))
+        data = tfds.as_numpy(tfds.load(name=flags_to_use.dataset, batch_size=-1, data_dir=DATA_DIR))
         inputs = data['train']['image']
         labels = data['train']['label']
 
         inputs = (inputs/127.5)-1
-        np.save(os.path.join(FLAGS.logdir, "x_train.npy"),inputs)
-        np.save(os.path.join(FLAGS.logdir, "y_train.npy"),labels)
-
+        np.save(os.path.join(flags_to_use.logdir, "x_train.npy"),inputs)
+        np.save(os.path.join(flags_to_use.logdir, "y_train.npy"),labels)
+    
+    inputs = inputs[:flags_to_use.dataset_size]
+    labels = labels[:flags_to_use.dataset_size]
     nclass = np.max(labels)+1
 
     np.random.seed(seed)
-    if FLAGS.num_experiments is not None:
+    if flags_to_use.num_experiments is not None:
         np.random.seed(0)
-        keep = np.random.uniform(0,1,size=(FLAGS.num_experiments, FLAGS.dataset_size))
+        keep = np.random.uniform(0,1,size=(flags_to_use.num_experiments, flags_to_use.dataset_size))
         order = keep.argsort(0)
-        keep = order < int(FLAGS.pkeep * FLAGS.num_experiments)
-        keep = np.array(keep[FLAGS.expid], dtype=bool)
+        keep = order < int(flags_to_use.pkeep * flags_to_use.num_experiments)
+        keep = np.array(keep[flags_to_use.expid], dtype=bool)
     else:
-        keep = np.random.uniform(0, 1, size=FLAGS.dataset_size) <= FLAGS.pkeep
+        keep = np.random.uniform(0, 1, size=flags_to_use.dataset_size) <= flags_to_use.pkeep
 
-    if FLAGS.only_subset is not None:
-        keep[FLAGS.only_subset:] = 0
+    if flags_to_use.only_subset is not None:
+        keep[flags_to_use.only_subset:] = 0
 
     xs = inputs[keep]
     ys = labels[keep]
 
-    if FLAGS.augment == 'weak':
+    if flags_to_use.augment == 'weak':
         aug = lambda x: augment(x, 4)
-    elif FLAGS.augment == 'mirror':
+    elif flags_to_use.augment == 'mirror':
         aug = lambda x: augment(x, 0)
-    elif FLAGS.augment == 'none':
+    elif flags_to_use.augment == 'none':
         aug = lambda x: augment(x, 0, mirror=False)
     else:
         raise
 
-    train = DataSet.from_arrays(xs, ys,
-                                augment_fn=aug)
-    test = DataSet.from_tfds(tfds.load(name=FLAGS.dataset, split='test', data_dir=DATA_DIR), xs.shape[1:])
-    train = train.cache().shuffle(8192).repeat().parse().augment().batch(FLAGS.batch)
+    train = DataSet.from_arrays(xs, ys, augment_fn=aug)
+    test = DataSet.from_tfds(tfds.load(name=flags_to_use.dataset, split='test', data_dir=DATA_DIR), xs.shape[1:])
+    train = train.cache().shuffle(8192).repeat().parse().augment().batch(flags_to_use.batch)
     train = train.nchw().one_hot(nclass).prefetch(16)
-    test = test.cache().parse().batch(FLAGS.batch).nchw().prefetch(16)
+    test = test.cache().parse().batch(flags_to_use.batch).nchw().prefetch(16)
 
     return train, test, xs, ys, keep, nclass
 
@@ -283,7 +290,7 @@ def main(argv):
     if not os.path.exists(logdir):
         os.makedirs(logdir)
 
-    train, test, xs, ys, keep, nclass = get_data(seed)
+    train, test, xs, ys, keep, nclass = get_data(seed, FLAGS)
 
     # Define the network and train_it
     tm = MemModule(network(FLAGS.arch), nclass=nclass,
@@ -304,7 +311,7 @@ def main(argv):
     np.save(os.path.join(logdir,'keep.npy'), keep)
 
     tm.train(FLAGS.epochs, len(xs), train, test, logdir,
-             save_steps=FLAGS.save_steps, patience=FLAGS.patience)
+             save_steps=FLAGS.save_steps, patience=FLAGS.patience, eval_steps=FLAGS.eval_steps)
 
 
 
