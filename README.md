@@ -28,7 +28,7 @@ We provide a tested installation script that sets up the environment with GPU su
 bash scripts/local_scripts/cluster_install_gpu.sh
 ```
 
-### RUNNING THE CODE
+### Repduce the LiRA result
 
 #### 1. Train the models
 
@@ -73,74 +73,36 @@ logs/exp/cifar10/
 -- tb/
 ```
 
-#### 2. Perform inference
+#### 2. Inference
 
-Once the models are trained, now it's necessary to perform inference and save
-the output features for each training example for each model in the dataset.
+Once the models are trained, now it's necessary to perform inference and save the output features for each training example for each model in the dataset. You can run inference using the Jupyter notebook `Notebooks/lira_attack/inference.ipynb`. 
 
-> python3 inference.py --logdir=exp/cifar10/
+The notebook performs two main tasks:
+1. **Generate logits**: Runs inference on each trained shadow model to generate logits for each training example
+2. **Compute scores**: Computes membership inference scores for each sample with respect to each shadow model
 
-This will add to the experiment directory a new set of files
+This will add to the experiment directory two new sets of files:
 
 ```
 exp/cifar10/
 - experiment_N_of_16
 -- logits/
 --- 0000000100.npy
-```
-
-where this new file has shape (50000, 10) and stores the model's output features
-for each example.
-
-#### 3. Compute membership inference scores
-
-Finally we take the output features and generate our logit-scaled membership
-inference scores for each example for each model.
-
-> python3 score.py exp/cifar10/
-
-And this in turn generates a new directory
-
-```
-exp/cifar10/
-- experiment_N_of_16
 -- scores/
 --- 0000000100.npy
 ```
 
-with shape (50000,) storing just our scores.
+- **logits/**: Contains model output logits with shape `(50000, 1, 2, 10)` storing the model's output features for each example with data augmentation
+- **scores/**: Contains membership inference scores with shape `(50000,)` - one score per training example indicating how likely it is that the example was in the training set
 
-### PLOTTING THE RESULTS
 
-Finally we can generate pretty pictures, and run the plotting code
 
-> python3 plot.py
-
-which should give (something like) the following output
-
-![Log-log ROC Curve for all attacks](fprtpr.png "Log-log ROC Curve")
-
-```
-Attack Ours (online)
-   AUC 0.6676, Accuracy 0.6077, TPR@0.1%FPR of 0.0169
-Attack Ours (online, fixed variance)
-   AUC 0.6856, Accuracy 0.6137, TPR@0.1%FPR of 0.0593
-Attack Ours (offline)
-   AUC 0.5488, Accuracy 0.5500, TPR@0.1%FPR of 0.0130
-Attack Ours (offline, fixed variance)
-   AUC 0.5549, Accuracy 0.5537, TPR@0.1%FPR of 0.0299
-Attack Global threshold
-   AUC 0.5921, Accuracy 0.6044, TPR@0.1%FPR of 0.0009
-```
-
-where the global threshold attack is the baseline, and our online,
-online-with-fixed-variance, offline, and offline-with-fixed-variance attack
-variants are the four other curves. Note that because we only train a few
-models, the fixed variance variants perform best.
 
 ### Citation
 
-You can cite this paper with
+We thank the authors for sharing their codebase, which has been invaluable for our study and research.
+
+If you use this codebase or the LiRA attack methodology, please cite the original paper:
 
 ```
 @article{carlini2021membership,

@@ -54,13 +54,3 @@ def load_one(base):
         logit = (np.log(y_true.mean((1))+1e-45) - np.log(y_wrong.mean((1))+1e-45))
 
         np.save(os.path.join(logdir, base, 'scores', f), logit)
-
-
-def load_stats():
-    with mp.Pool(8) as p:
-        p.map(load_one, [x for x in os.listdir(logdir) if 'exp' in x])
-
-
-logdir = sys.argv[1]
-labels = np.load(os.path.join(logdir,"y_train.npy"))
-load_stats()
