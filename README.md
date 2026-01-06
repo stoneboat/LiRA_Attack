@@ -96,7 +96,19 @@ exp/cifar10/
 - **scores/**: Contains membership inference scores with shape `(50000,)` - one score per training example indicating how likely it is that the example was in the training set
 
 
+#### 3. Plot and Analyze Score Distributions
 
+After computing scores, you can visualize the score difference of record in and out under a model using the Jupyter notebook `Notebooks/lira_attack/plot.ipynb`.
+
+1. **Loads scores and masks**: For each shadow model, it loads:
+   - `scores/{epoch}.npy`: scores for each imagine, where the score function is a deterministic function parametrized by the training model
+   - `keep.npy`: Boolean mask indicating which examples were included in the training set
+
+2. **Separates scores by membership**: 
+   - **IN scores**: Scores for examples that were in the training set (`keep == True`)
+   - **OUT scores**: Scores for examples that were not in the training set (`keep == False`)
+
+3. **Generates visualizations** for each shadow model: we use two statistics, the histogram and empirical cdf. 
 
 ### Citation
 
