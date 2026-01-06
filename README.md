@@ -1,10 +1,12 @@
 ## Membership Inference Attacks From First Principles
 
-This directory contains code to reproduce our paper:
+This repository is based on the original codebase from Google Research for the paper:
 
 **"Membership Inference Attacks From First Principles"** <br>
 https://arxiv.org/abs/2112.03570 <br>
 by Nicholas Carlini, Steve Chien, Milad Nasr, Shuang Song, Andreas Terzis, and Florian Tramèr.
+
+The code has been modified and extended to study the Likelihood Ratio Attack (LiRA) methodology described in the paper.
 
 ### INSTALLING
 
@@ -40,10 +42,23 @@ The first step in our attack is to train shadow models. As a baseline that shoul
 - `pkeep` is the probability that each sample will be included in the training set.
 
 **To train 16 shadow models:**
-Run the notebook 16 times, each time setting `expid` to a different value from 0 to 15. For example:
-- First run: set `expid = 0` and `num_experiments = 16`
-- Second run: set `expid = 1` and `num_experiments = 16`
-- Continue until `expid = 15`
+
+You can train shadow models using either method:
+
+1. **Using the Jupyter notebook**: Run the notebook 16 times, each time setting `expid` to a different value from 0 to 15. For example:
+   - First run: set `expid = 0` and `num_experiments = 16`
+   - Second run: set `expid = 1` and `num_experiments = 16`
+   - Continue until `expid = 15`
+
+2. **Using the Python script** (recommended for batch training):
+   ```bash
+   python scripts/lira_attack/train_models.py \
+       --num_experiments 16 \
+       --expid_list 0,15 \
+       --epochs 100 \
+       --dataset_size 50000
+   ```
+   This will train all experiments from 0 to 15 in sequence.
 
 This will train several CIFAR-10 wide ResNet models to ~91% accuracy each, and
 will output a bunch of files under the directory `logs/exp/cifar10/` with structure:
